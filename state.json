@@ -1,0 +1,52 @@
+{
+  "people": [
+    {
+      "name": "Jony",
+      "color": "green"
+    },
+    {
+      "name": "Matúško",
+      "color": "green"
+    },
+    {
+      "name": "Cyniko",
+      "color": "green"
+    },
+    {
+      "name": "Adelka",
+      "color": "green"
+    },
+    {
+      "name": "Félixko",
+      "color": "green"
+    },
+    {
+      "name": "Hanka",
+      "color": "green"
+    },
+    {
+      "name": "Paľko",
+      "color": "green"
+    },
+    {
+      "name": "Matejko",
+      "color": "green"
+    },
+    {
+      "name": "Tadeáš",
+      "color": "green"
+    },
+    {
+      "name": "Dorotka",
+      "color": "green"
+    },
+    {
+      "name": "Terezka",
+      "color": "green"
+    },
+    {
+      "name": "Robko",
+      "color": "green"
+    }
+  ]
+}

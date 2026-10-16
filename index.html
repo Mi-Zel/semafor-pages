@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='5' fill='%233fc34a'/%3E%3C/svg%3E">
+<title>Semafor</title>
+<style>
+  :root { --bg:#e9dfd0; --board:#111; --ink:#222; --chip:#e8c99a; --chip-edge:#b98d52; --label:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#2a2520; --ink:#eee; } }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg); font-family: system-ui, "Segoe UI", sans-serif; color:var(--ink); }
+  header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; max-width:760px; margin:0 auto; }
+  header h1 { font-size:1.2rem; margin:0; }
+  button.link { background:none; border:1px solid currentColor; border-radius:8px; padding:6px 12px; cursor:pointer; font:inherit; color:inherit; }
+  main { max-width:760px; margin:0 auto; padding:0 16px 32px; }
+  .board { background:var(--board); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+  .row { --c:#888; display:grid; grid-template-columns: auto 1fr; align-items:center; gap:14px; min-height:112px; padding:10px 14px;
+         border-left:12px solid var(--c); background:color-mix(in srgb, var(--c) 20%, #111); }
+  .row + .row { border-top:3px solid #000; }
+  .row.red { --c:#e8402c; } .row.orange { --c:#f58a42; } .row.yellow { --c:#e8e86a; } .row.green { --c:#3fc34a; }
+  .face { width:88px; height:88px; display:block; }
+  .names { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .empty { color:#fff6; font-size:.9rem; }
+  .chip { display:flex; align-items:center; gap:4px; background:var(--chip); border:2px solid var(--chip-edge); border-radius:6px; padding:2px 4px; color:#222; }
+  .chip span { background:var(--label); border-radius:3px; padding:1px 8px; font-size:.9rem; min-width:64px; text-align:center; }
+  .chip button { border:0; background:#0003; border-radius:4px; width:26px; height:26px; cursor:pointer; font-size:.8rem; line-height:1; }
+  .chip button:hover:not(:disabled) { background:#0006; }
+  .chip button:disabled { opacity:.25; cursor:default; }
+  [hidden] { display:none !important; }
+  .msg { text-align:center; min-height:1.4em; margin:8px 0 0; color:#c0392b; }
+  dialog { border:0; border-radius:12px; padding:20px; max-width:min(92vw, 420px); }
+  dialog::backdrop { background:#0008; }
+  dialog input { font:inherit; padding:8px; width:100%; margin:8px 0; }
+  dialog .err { color:#b00020; min-height:1.2em; margin:0 0 8px; }
+  dialog .hint { font-size:.8rem; color:#666; margin:0 0 6px; }
+  dialog .btns { display:flex; gap:8px; justify-content:flex-end; }
+  button { touch-action:manipulation; }
+  @media (max-width:560px) {
+    header { padding:10px 12px; flex-wrap:wrap; gap:8px; }
+    main { padding:0 8px 24px; }
+    .row { gap:10px; padding:8px 10px; border-left-width:10px; min-height:96px; }
+    .face { width:64px; height:64px; }
+    .names { gap:6px; }
+    .chip { padding:3px 5px; }
+    .chip span { font-size:1rem; min-width:0; padding:3px 10px; }
+    .chip button { width:36px; height:36px; font-size:.95rem; }
+    button.link { padding:9px 14px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Semafor</h1>
+  <div><button class="link" id="add" hidden>+ Pridať meno</button> <button class="link" id="auth">Prihlásiť (admin)</button></div>
+</header>
+<main>
+  <div class="board" id="board" aria-live="polite"></div>
+  <p class="msg" id="msg" role="status"></p>
+</main>
+
+<dialog id="login">
+  <form id="loginForm">
+    <label for="pw">GitHub token administrátora</label>
+    <input id="pw" type="password" autocomplete="off" required>
+    <p class="hint">Fine-grained token len pre tento repozitár, právo Contents: Read and write. Ukladá sa iba v tomto prehliadači.</p>
+    <p class="err" id="loginErr"></p>
+    <div class="btns">
+      <button type="button" class="link" id="cancel">Zrušiť</button>
+      <button class="link">Prihlásiť</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const OWNER = 'Mi-Zel', REPO = 'semafor-pages', FILE = 'state.json', BRANCH = 'main';
+const COLORS = ['red', 'orange', 'yellow', 'green']; // top -> bottom
+const REPO_API = `https://api.github.com/repos/${OWNER}/${REPO}`;
+const FILE_API = `${REPO_API}/contents/${FILE}`;
+
+const FACES = {
+  red:    { fill:'#e8402c', label:'červená',  mouth:'M30 74 Q48 58 66 74', extra:'<path d="M26 56 q-3 10 0 14 q4 -3 0 -14z" fill="#8fd0f0"/><path d="M70 56 q3 10 0 14 q-4 -3 0 -14z" fill="#8fd0f0"/>' },
+  orange: { fill:'#f58a42', label:'oranžová', mouth:'M28 72 q5 -6 10 0 t10 0 t10 0 t10 0', extra:'' },
+  yellow: { fill:'#e8e86a', label:'žltá',     mouth:'M30 70 Q48 74 66 70', extra:'' },
+  green:  { fill:'#3fc34a', label:'zelená',   mouth:'M26 64 Q48 92 70 64 Z', extra:'', filled:true },
+};
+function faceSvg(c) {
+  const f = FACES[c];
+  const eye = (x) => `<ellipse cx="${x}" cy="40" rx="11" ry="13" fill="#fff" stroke="#7a4a2a" stroke-width="2"/><circle cx="${x}" cy="42" r="6" fill="#3a2a22"/>`;
+  return `<svg class="face" viewBox="0 0 96 96" role="img" aria-label="${f.label}">
+    <circle cx="48" cy="48" r="45" fill="${f.fill}" stroke="#ddd" stroke-width="2"/>
+    ${eye(32)}${eye(64)}${f.extra}
+    <path d="${f.mouth}" fill="${f.filled ? '#222' : 'none'}" stroke="#222" stroke-width="3" stroke-linecap="round"/>
+  </svg>`;
+}
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let token = null;
+try { token = localStorage.getItem('semafor-token'); } catch {}
+let state = { people: [] }, busy = false;
+const isAdmin = () => !!token;
+
+// ---- storage: public reads the published file, admin reads/writes through the GitHub API ----
+const b64d = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g, '')), (c) => c.charCodeAt(0)));
+const b64e = (s) => { let bin = ''; new TextEncoder().encode(s).forEach((x) => { bin += String.fromCharCode(x); }); return btoa(bin); };
+async function gh(url, opts = {}) {
+  const r = await fetch(url, { cache: 'no-store', ...opts, headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, ...(opts.headers || {}) } });
+  return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+}
+async function readPublic() {
+  const r = await fetch(`${FILE}?t=${Date.now()}`, { cache: 'no-store' });
+  if (!r.ok) throw new Error('Nepodarilo sa načítať údaje.');
+  return (await r.json()).people;
+}
+async function readAdmin() {
+  const { ok, status, data } = await gh(`${FILE_API}?ref=${BRANCH}`);
+  if (!ok) { const e = new Error(status === 401 || status === 403 ? 'Token nie je platný.' : 'Nepodarilo sa načítať údaje.'); e.auth = status === 401 || status === 403; throw e; }
+  return { people: JSON.parse(b64d(data.content)).people, sha: data.sha };
+}
+// Re-read the latest file, apply the change on it, write it back (retry once if someone else wrote meanwhile).
+async function mutate(change, message) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const cur = await readAdmin();
+    change(cur.people); // throws Error with a user message on invalid change
+    const body = { message, content: b64e(JSON.stringify({ people: cur.people }, null, 2) + '\n'), sha: cur.sha, branch: BRANCH };
+    const { ok, status } = await gh(FILE_API, { method: 'PUT', body: JSON.stringify(body) });
+    if (ok) return cur.people;
+    if (status !== 409 && status !== 422) { const e = new Error('Uloženie zlyhalo.'); e.auth = status === 401 || status === 403; throw e; }
+  }
+  throw new Error('Súbor sa medzitým zmenil, skús znova.');
+}
+
+// ---- rendering ----
+function chip(p, i) {
+  const last = COLORS.length - 1;
+  const n = esc(p.name);
+  const a = isAdmin();
+  const up = a ? `<button data-name="${n}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="${n} vyššie">▲</button>` : '';
+  const down = a ? `<button data-name="${n}" data-dir="1" ${i === last ? 'disabled' : ''} aria-label="${n} nižšie">▼</button>` : '';
+  const tools = a ? `<button data-name="${n}" data-act="rename" aria-label="Premenovať ${n}">✎</button><button data-name="${n}" data-act="delete" aria-label="Zmazať ${n}">✕</button>` : '';
+  return `<div class="chip">${up}<span>${n}</span>${down}${tools}</div>`;
+}
+function render() {
+  $('auth').textContent = isAdmin() ? 'Odhlásiť' : 'Prihlásiť (admin)';
+  $('add').hidden = !isAdmin();
+  $('board').innerHTML = COLORS.map((c, i) => {
+    const people = state.people.filter((p) => p.color === c);
+    const names = people.length ? people.map((p) => chip(p, i)).join('') : '<span class="empty">—</span>';
+    return `<section class="row ${c}" aria-label="${FACES[c].label}">${faceSvg(c)}<div class="names">${names}</div></section>`;
+  }).join('');
+}
+function logout() {
+  token = null;
+  try { localStorage.removeItem('semafor-token'); } catch {}
+}
+async function refresh(keepMsg) {
+  if (busy) return;
+  try {
+    state.people = isAdmin() ? (await readAdmin()).people : await readPublic();
+    if (keepMsg !== true) $('msg').textContent = '';
+  } catch (e) {
+    if (e.auth) { logout(); $('msg').textContent = e.message; }
+    else if (!state.people.length) $('msg').textContent = e.message;
+  }
+  render();
+}
+async function act(change, message) {
+  if (busy) return;
+  busy = true;
+  try {
+    state.people = await mutate(change, message);
+    $('msg').textContent = '';
+  } catch (e) {
+    if (e.auth) logout();
+    $('msg').textContent = e.message;
+  }
+  busy = false;
+  render();
+  if ($('msg').textContent) refresh(true); // resync with the file but keep showing the error
+}
+
+// ---- admin actions (the data rules live here, since there is no server) ----
+const clean = (v) => String(v || '').trim().replace(/\s+/g, ' ');
+const taken = (people, n, except) => people.some((p) => p !== except && p.name.toLowerCase() === n.toLowerCase());
+function checkName(people, n, except) {
+  if (!n || n.length > 30) throw new Error('Meno musí mať 1 až 30 znakov.');
+  if (taken(people, n, except)) throw new Error('Toto meno už existuje.');
+}
+function find(people, name) {
+  const p = people.find((x) => x.name === name);
+  if (!p) throw new Error('Meno už neexistuje.');
+  return p;
+}
+$('board').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-name]');
+  if (!b || !isAdmin()) return;
+  const name = b.dataset.name;
+  if (b.dataset.dir) {
+    const dir = Number(b.dataset.dir);
+    act((people) => {
+      const p = find(people, name);
+      const idx = COLORS.indexOf(p.color) + dir;
+      if (idx < 0 || idx >= COLORS.length) throw new Error('Už je na kraji.');
+      p.color = COLORS[idx];
+    }, `${name}: ${dir < 0 ? 'vyššie' : 'nižšie'}`);
+  } else if (b.dataset.act === 'delete') {
+    if (confirm(`Zmazať meno "${name}"?`)) act((people) => { people.splice(people.indexOf(find(people, name)), 1); }, `Zmazané: ${name}`);
+  } else if (b.dataset.act === 'rename') {
+    const raw = prompt('Nové meno:', name);
+    if (raw === null || clean(raw) === name) return;
+    act((people) => { const p = find(people, name); const n = clean(raw); checkName(people, n, p); p.name = n; }, `Premenované: ${name}`);
+  }
+});
+$('add').addEventListener('click', () => {
+  const raw = prompt('Meno nového dieťaťa:');
+  if (raw === null || !clean(raw)) return;
+  act((people) => { const n = clean(raw); checkName(people, n); people.push({ name: n, color: 'green' }); }, `Pridané: ${clean(raw)}`);
+});
+
+// ---- login = paste a GitHub token; we check it can write to this repo ----
+$('auth').addEventListener('click', () => {
+  if (isAdmin()) { logout(); refresh(); }
+  else { $('pw').value = ''; $('loginErr').textContent = ''; $('login').showModal(); $('pw').focus(); }
+});
+$('cancel').addEventListener('click', () => $('login').close());
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  token = $('pw').value.trim();
+  const { ok, data } = await gh(REPO_API);
+  if (!ok || !data.permissions || !data.permissions.push) {
+    logout();
+    $('loginErr').textContent = 'Token je neplatný alebo nemá právo zapisovať do repozitára.';
+    return;
+  }
+  try { localStorage.setItem('semafor-token', token); } catch {}
+  $('login').close();
+  refresh();
+});
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
